@@ -1,0 +1,270 @@
+:root {
+  /* Backgrounds */
+  --bg-primary: #F7FAFC; /* cloud white */
+  --bg-secondary: #EFF6FB; /* ice blue */
+  
+  /* Primary Brand */
+  --brand-primary: #2E9CCA; /* sky blue */
+  --brand-dark: #1A6FA8; /* deep aqua */
+  --brand-gradient: linear-gradient(135deg, var(--brand-primary), var(--brand-dark));
+  
+  /* Accent */
+  --accent: #5FD6C4; /* soft teal */
+  
+  /* Risk Colors (For flood-risk data only) */
+  --risk-low: #2FAE6B; /* calm green */
+  --risk-medium: #F0A93B; /* amber */
+  --risk-high: #E0563C; /* soft coral-red */
+  
+  /* Text */
+  --text-heading: #16242E; /* ink navy */
+  --text-body: #5A6B78;
+  
+  /* UI Elements */
+  --card-bg: #FFFFFF;
+  --card-border: 1px solid #E3ECF1;
+  --card-shadow: 0 4px 20px rgba(20, 60, 90, 0.06);
+  --card-radius: 18px;
+  
+  /* Typography */
+  --font-heading: 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-body);
+  font-family: var(--font-body);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Topographic background pattern (SVG) */
+body::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('data:image/svg+xml;utf8,<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg"><path d="M10,10 Q50,90 90,10 T190,10" fill="none" stroke="%231A6FA8" stroke-width="1" opacity="0.05"/></svg>');
+  background-size: 200px 200px;
+  z-index: -1;
+  pointer-events: none;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  color: var(--text-heading);
+  font-weight: 600;
+  line-height: 1.2;
+  margin-bottom: 0.5em;
+}
+
+h1 {
+  font-size: 2.5rem;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 1.75rem;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin-bottom: 1.5em;
+  max-width: 65ch;
+}
+
+/* Layout */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.section {
+  padding: 80px 0;
+}
+
+.section-alt {
+  background-color: var(--bg-secondary);
+}
+
+/* Cards */
+.card {
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  padding: 24px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(20, 60, 90, 0.1);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 24px;
+  border-radius: 30px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  font-family: var(--font-heading);
+}
+
+.btn-primary {
+  background: var(--brand-gradient);
+  color: white;
+  box-shadow: 0 4px 15px rgba(46, 156, 202, 0.3);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 6px 20px rgba(46, 156, 202, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Stats */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  margin-bottom: 2px;
+}
+
+.stat-label {
+  font-size: 0.875rem;
+  color: var(--text-body);
+  margin: 0;
+}
+
+/* Risk Indicators */
+.risk-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.risk-low {
+  background-color: rgba(47, 174, 107, 0.1);
+  color: var(--risk-low);
+}
+
+.risk-medium {
+  background-color: rgba(240, 169, 59, 0.1);
+  color: var(--risk-medium);
+}
+
+.risk-high {
+  background-color: rgba(224, 86, 60, 0.1);
+  color: var(--risk-high);
+}
+
+/* Header */
+.navbar {
+  padding: 20px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logo {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--brand-dark);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo svg {
+  color: var(--brand-primary);
+}
+
+/* Wave Divider */
+.wave-divider {
+  position: relative;
+  height: 50px;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.wave-divider svg {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Map Mockup */
+.map-container {
+  width: 100%;
+  height: 400px;
+  background: #E8F0F5;
+  border-radius: var(--card-radius);
+  border: var(--card-border);
+  position: relative;
+  overflow: hidden;
+  margin-top: 32px;
+}
+
+.map-route {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+@media (max-width: 768px) {
+  h1 { font-size: 2rem; }
+  h2 { font-size: 1.5rem; }
+  .section { padding: 40px 0; }
+}

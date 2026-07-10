@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: puddlex-backend
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: puddlex-db
+          property: connectionString
+      - key: FRONTEND_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AWS_BUCKET_NAME
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+        
+databases:
+  - name: puddlex-db
+    databaseName: puddlex
+    user: puddlex_user

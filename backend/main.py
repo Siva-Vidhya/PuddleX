@@ -1,0 +1,132 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import os
+import asyncio
+from contextlib import asynccontextmanager
+
+from database import Base, engine, SessionLocal
+from routers import reports, predict, route, drainage, auth
+from models.road_segment import RoadSegment
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+async def flood_memory_recalculation():
+    """Background task to simulate flood risk recalculation."""
+    import pandas as pd
+    from services import weather
+    while True:
+        try:
+            await asyncio.sleep(60)
+            print("[Scheduler] Running flood memory recalculation...")
+            db = SessionLocal()
+            try:
+                roads = db.query(RoadSegment).all()
+                for r in roads:
+                    if r.coordinates:
+                        lat, lng = r.coordinates[0]
+                        r.rainfall_mm = weather.get_rainfall(lat, lng)
+                        
+                if roads and predict.model:
+                    count = 0
+                    for r in roads:
+                        features = pd.DataFrame([{
+                            'rainfall_mm': r.rainfall_mm,
+                            'elevation_m': r.elevation_m,
+                            'drainage_score': r.drainage_score,
+                            'past_flood_count': r.past_flood_count,
+                            'citizen_reports_count': r.citizen_reports_count,
+                            'road_type': r.road_type
+                        }])
+                        prob = predict.model.predict_proba(features)[0][1]
+                        
+                        if prob < 0.3:
+                            r.risk_level = "low"
+                        elif prob < 0.7:
+                            r.risk_level = "medium"
+                        else:
+                            r.risk_level = "high"
+                            
+                        r.risk_probability = prob
+                        count += 1
+                    db.commit()
+                    print(f"[Scheduler] Recalculated risk for {count} roads.")
+                    
+                    # Update live routing graph if it's loaded
+                    from services import routing
+                    if routing.G:
+                        for r in roads:
+                            parts = r.id.split('-')
+                            if len(parts) == 2:
+                                try:
+                                    u, v = int(parts[0]), int(parts[1])
+                                    if routing.G.has_edge(u, v):
+                                        for k in routing.G[u][v]:
+                                            data = routing.G[u][v][k]
+                                            data['risk_probability'] = r.risk_probability
+                                            data['risk_level'] = r.risk_level
+                                            length = data.get('length', 1.0)
+                                            if r.risk_probability > 0.85:
+                                                data['safe_weight'] = float('inf')
+                                            else:
+                                                data['safe_weight'] = length * (1 + 3.0 * r.risk_probability)
+                                except ValueError:
+                                    pass
+                else:
+                    print("[Scheduler] No roads found or model not loaded.")
+            except Exception as e:
+                print(f"[Scheduler] Error: {e}")
+                db.rollback()
+            finally:
+                db.close()
+                
+            print("[Scheduler] Flood memory recalculation cycle complete.")
+        except asyncio.CancelledError:
+            break
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load ML model on startup
+    predict.load_model()
+    # Start background task
+    task = asyncio.create_task(flood_memory_recalculation())
+    yield
+    # Cleanup on shutdown
+    task.cancel()
+
+app = FastAPI(title="PuddleX API", version="1.0.0", lifespan=lifespan)
+
+# Mount uploads directory to serve images statically
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Configure CORS for frontend access
+frontend_url = os.getenv("FRONTEND_URL")
+origins = ["http://localhost:3000"]
+if frontend_url:
+    origins.append(frontend_url)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class HealthResponse(BaseModel):
+    status: str
+    message: str
+
+@app.get("/api/health", response_model=HealthResponse)
+def health_check():
+    """Basic health-check route to confirm backend is running."""
+    return HealthResponse(status="ok", message="Backend Connection: OK")
+
+app.include_router(reports.router)
+app.include_router(predict.router)
+app.include_router(route.router)
+app.include_router(drainage.router)
+app.include_router(auth.router)
