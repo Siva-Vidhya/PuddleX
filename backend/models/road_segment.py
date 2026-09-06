@@ -1,29 +1,29 @@
-from sqlalchemy import Column, String, Float, Integer
+from datetime import datetime
+from sqlalchemy import Column, String, Float, Integer, Boolean, Text, DateTime
 from database import Base
-import json
 
 class RoadSegment(Base):
     __tablename__ = "road_segments"
-    
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    
-    # Store coordinates as a JSON string: "[[lat, lng], [lat, lng]]"
-    coordinates_json = Column(String, nullable=False)
-    
-    # ML Features
-    rainfall_mm = Column(Float, default=0.0)
-    elevation_m = Column(Float, default=10.0)
-    drainage_score = Column(Float, default=50.0)
-    past_flood_count = Column(Integer, default=0)
-    citizen_reports_count = Column(Integer, default=0)
-    road_type = Column(Integer, default=0)
-    
-    # Computed Outputs
-    risk_level = Column(String, default="low") # 'low', 'medium', 'high'
-    risk_probability = Column(Float, default=0.0)
-    last_reported_flood = Column(String, nullable=True)
-    
-    @property
-    def coordinates(self):
-        return json.loads(self.coordinates_json)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    osm_id = Column(String, unique=True, index=True)   # from "id" field e.g. "way/4748353"
+    name = Column(String, nullable=True)
+    highway = Column(String, nullable=True)            # primary, residential, tertiary etc.
+    surface = Column(String, nullable=True)
+    lanes = Column(String, nullable=True)
+    oneway = Column(String, nullable=True)
+    bridge = Column(String, nullable=True)
+    geometry = Column(Text, nullable=True)             # GeoJSON LineString as JSON string
+    centroid_lat = Column(Float, nullable=True)        # computed centroid lat
+    centroid_lng = Column(Float, nullable=True)        # computed centroid lng
+    flood_risk = Column(String, default="low")         # low / medium / high
+    is_flood_prone = Column(Boolean, default=False)    # from historical flood data
+    flood_count = Column(Integer, default=0)           # how many flood points matched
+    avg_water_depth_cm = Column(Float, default=0.0)
+    rainfall_mm = Column(Float, default=0.0)           # last live rainfall value
+    road_length = Column(Float, default=100.0)
+    dist_to_water_m = Column(Float, default=500.0)
+    dist_to_drain_m = Column(Float, default=500.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

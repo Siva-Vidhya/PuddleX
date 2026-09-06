@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', system-ui, sans-serif;
+    --font-sora: 'Sora', system-ui, sans-serif;
+  }
+  
+  body {
+    background-color: theme('colors.bg.primary');
+    color: theme('colors.ink.body');
+    font-family: var(--font-inter);
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Topographic background pattern */
+  body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('data:image/svg+xml;utf8,<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg"><path d="M10,10 Q50,90 90,10 T190,10" fill="none" stroke="%231A6FA8" stroke-width="1" opacity="0.05"/></svg>');
+    background-size: 200px 200px;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sora);
+    color: theme('colors.ink.heading');
+    font-weight: 600;
+  }
+}
+
+@layer utilities {
+  .wave-divider {
+    position: relative;
+    height: 50px;
+    overflow: hidden;
+    line-height: 0;
+  }
+  .wave-divider svg {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  }
+}

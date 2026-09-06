@@ -6,12 +6,14 @@ import os
 import asyncio
 from contextlib import asynccontextmanager
 
+from config import settings
 from database import Base, engine, SessionLocal
-from routers import reports, predict, route, drainage, auth
+from routers import reports, predict, route, drainage, auth, weather
 from models.road_segment import RoadSegment
 
 # Create tables
 Base.metadata.create_all(bind=engine)
+
 
 async def flood_memory_recalculation():
     """Background task to simulate flood risk recalculation."""
@@ -25,31 +27,36 @@ async def flood_memory_recalculation():
             try:
                 roads = db.query(RoadSegment).all()
                 for r in roads:
-                    if r.coordinates:
-                        lat, lng = r.coordinates[0]
-                        r.rainfall_mm = weather.get_rainfall(lat, lng)
+                    if getattr(r, 'centroid_lat', None) and getattr(r, 'centroid_lng', None):
+                        w_data = await weather.get_rainfall(r.centroid_lat, r.centroid_lng)
+                        r.rainfall_mm = w_data.get("rainfall_mm", 0.0) if isinstance(w_data, dict) else 0.0
                         
                 if roads and predict.model:
                     count = 0
                     for r in roads:
                         features = pd.DataFrame([{
-                            'rainfall_mm': r.rainfall_mm,
-                            'elevation_m': r.elevation_m,
-                            'drainage_score': r.drainage_score,
-                            'past_flood_count': r.past_flood_count,
-                            'citizen_reports_count': r.citizen_reports_count,
-                            'road_type': r.road_type
+                            'rainfall_mm': getattr(r, 'rainfall_mm', 0.0),
+                            'elevation_m': getattr(r, 'elevation_m', 10.0),
+                            'drainage_score': getattr(r, 'drainage_score', 50.0),
+                            'past_flood_count': getattr(r, 'flood_count', 0),
+                            'citizen_reports_count': getattr(r, 'citizen_reports_count', 0),
+                            'road_type': 1
                         }])
                         prob = predict.model.predict_proba(features)[0][1]
                         
                         if prob < 0.3:
-                            r.risk_level = "low"
+                            risk = "low"
                         elif prob < 0.7:
-                            r.risk_level = "medium"
+                            risk = "medium"
                         else:
-                            r.risk_level = "high"
+                            risk = "high"
                             
-                        r.risk_probability = prob
+                        if hasattr(r, 'flood_risk'):
+                            r.flood_risk = risk
+                        if hasattr(r, 'risk_level'):
+                            r.risk_level = risk
+                        if hasattr(r, 'risk_probability'):
+                            r.risk_probability = prob
                         count += 1
                     db.commit()
                     print(f"[Scheduler] Recalculated risk for {count} roads.")
@@ -58,20 +65,22 @@ async def flood_memory_recalculation():
                     from services import routing
                     if routing.G:
                         for r in roads:
-                            parts = r.id.split('-')
+                            osm_id = getattr(r, 'osm_id', getattr(r, 'id', ''))
+                            parts = str(osm_id).split('-')
                             if len(parts) == 2:
                                 try:
                                     u, v = int(parts[0]), int(parts[1])
                                     if routing.G.has_edge(u, v):
                                         for k in routing.G[u][v]:
                                             data = routing.G[u][v][k]
-                                            data['risk_probability'] = r.risk_probability
-                                            data['risk_level'] = r.risk_level
+                                            risk_prob = getattr(r, 'risk_probability', 0.0)
+                                            data['risk_probability'] = risk_prob
+                                            data['risk_level'] = getattr(r, 'flood_risk', 'low')
                                             length = data.get('length', 1.0)
-                                            if r.risk_probability > 0.85:
+                                            if risk_prob > 0.85:
                                                 data['safe_weight'] = float('inf')
                                             else:
-                                                data['safe_weight'] = length * (1 + 3.0 * r.risk_probability)
+                                                data['safe_weight'] = length * (1 + 3.0 * risk_prob)
                                 except ValueError:
                                     pass
                 else:
@@ -86,10 +95,19 @@ async def flood_memory_recalculation():
         except asyncio.CancelledError:
             break
 
+from services.prediction import load_model
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Load ML model on startup
-    predict.load_model()
+    load_model()
+    from database import SessionLocal
+    from services.prediction import precompute_all_segments
+    _db = SessionLocal()
+    try:
+        await precompute_all_segments(_db)
+    finally:
+        _db.close()
     # Start background task
     task = asyncio.create_task(flood_memory_recalculation())
     yield
@@ -98,19 +116,30 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PuddleX API", version="1.0.0", lifespan=lifespan)
 
+port = int(os.getenv("PORT", 8000))
+
+@app.on_event("startup")
+async def startup_event():
+    print(f"Server starting on port: {port}")
+    print(f"ENV: {settings.APP_ENV}")
+    print(f"Open-Meteo: {settings.OPEN_METEO_BASE_URL}")
+    print(f"Nominatim: {settings.NOMINATIM_BASE_URL}")
+    print(f"OSRM: {settings.OSRM_BASE_URL}")
+    print(f"Database: {settings.DATABASE_URL}")
+
 # Mount uploads directory to serve images statically
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Configure CORS for frontend access
-frontend_url = os.getenv("FRONTEND_URL")
-origins = ["http://localhost:3000"]
-if frontend_url:
-    origins.append(frontend_url)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://*.vercel.app",
+        "https://puddlex.vercel.app",
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -130,3 +159,4 @@ app.include_router(predict.router)
 app.include_router(route.router)
 app.include_router(drainage.router)
 app.include_router(auth.router)
+app.include_router(weather.router)

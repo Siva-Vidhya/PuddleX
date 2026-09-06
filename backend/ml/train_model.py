@@ -1,95 +1,102 @@
+import os, sys
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 import joblib
-import os
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from feature_engineering import build_feature_matrix
 
-def generate_synthetic_data(num_samples=5000):
-    np.random.seed(42)
-    
-    # Generate features
-    # rainfall_mm: usually between 0 and 150mm
-    rainfall_mm = np.random.exponential(scale=20, size=num_samples)
-    
-    # elevation_m: between 2m and 50m
-    elevation_m = np.random.uniform(2, 50, size=num_samples)
-    
-    # drainage_score: 0 to 100
-    drainage_score = np.random.normal(loc=50, scale=20, size=num_samples)
-    drainage_score = np.clip(drainage_score, 0, 100)
-    
-    # past_flood_count: 0 to 10
-    past_flood_count = np.random.poisson(lam=1, size=num_samples)
-    
-    # citizen_reports_count: 0 to 20
-    citizen_reports_count = np.random.poisson(lam=0.5, size=num_samples)
-    
-    # road_type: 0 (highway), 1 (arterial), 2 (local)
-    road_type = np.random.randint(0, 3, size=num_samples)
-    
-    # Calculate flood probability based on correlations
-    # High rainfall increases prob
-    # Low elevation increases prob
-    # Low drainage increases prob
-    # High past flood count increases prob
-    # High citizen reports increases prob
-    
-    base_prob = 0.1
-    
-    # Normalized factors (roughly 0 to 1)
-    rain_factor = np.clip(rainfall_mm / 100, 0, 1)
-    elevation_factor = np.clip(1 - (elevation_m / 50), 0, 1)
-    drainage_factor = np.clip(1 - (drainage_score / 100), 0, 1)
-    history_factor = np.clip(past_flood_count / 5, 0, 1)
-    reports_factor = np.clip(citizen_reports_count / 10, 0, 1)
-    
-    # Combine factors to create a probability
-    prob = (base_prob + 
-            0.3 * rain_factor + 
-            0.2 * elevation_factor + 
-            0.2 * drainage_factor + 
-            0.15 * history_factor + 
-            0.15 * reports_factor)
-            
-    # Add some noise
-    prob = np.clip(prob + np.random.normal(0, 0.1, size=num_samples), 0, 1)
-    
-    # Generate labels (1 for flood, 0 for no flood)
-    flood_occurred = np.random.binomial(1, p=prob)
-    
-    df = pd.DataFrame({
-        'rainfall_mm': rainfall_mm,
-        'elevation_m': elevation_m,
-        'drainage_score': drainage_score,
-        'past_flood_count': past_flood_count,
-        'citizen_reports_count': citizen_reports_count,
-        'road_type': road_type,
-        'flood_occurred': flood_occurred
-    })
-    
-    return df
+FEATURE_COLS = [
+    "highway_score",
+    "oneway",
+    "bridge",
+    "road_length",
+    "dist_to_water_m",
+    "dist_to_drain_m",
+    "flood_count",
+    "avg_rainfall_mm",
+]
 
-def main():
-    print("Generating synthetic data...")
-    df = generate_synthetic_data(5000)
-    
-    X = df[['rainfall_mm', 'elevation_m', 'drainage_score', 'past_flood_count', 'citizen_reports_count', 'road_type']]
-    y = df['flood_occurred']
-    
-    print("Training RandomForestClassifier...")
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X, y)
-    
-    # Save the model
-    output_path = os.path.join(os.path.dirname(__file__), "flood_model.joblib")
-    joblib.dump(model, output_path)
-    print(f"Model saved successfully to {output_path}")
-    
-    # Print feature importances
+LABEL_MAP    = {0: "low", 1: "medium", 2: "high"}
+MODEL_PATH   = os.path.join(os.path.dirname(__file__), "puddlex_model.joblib")
+SCALER_PATH  = os.path.join(os.path.dirname(__file__), "puddlex_scaler.joblib")
+FEATURES_PATH = os.path.join(os.path.dirname(__file__), "feature_columns.json")
+
+def train():
+    print("=== PuddleX Random Forest Training ===\n")
+
+    df, _ = build_feature_matrix()
+
+    X = df[FEATURE_COLS].fillna(0)
+    y = df["risk_label"]
+
+    print(f"Dataset size : {len(X)} samples")
+    print(f"Features     : {FEATURE_COLS}")
+    print(f"Class counts : {dict(y.value_counts())}\n")
+
+    # Scale features
+    scaler = MinMaxScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # Since we only have 319 roads, use 80/20 split
+    # and cross-validation for reliability
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2,
+        random_state=42, stratify=y if y.nunique() > 1 else None
+    )
+
+    model = RandomForestClassifier(
+        n_estimators  = 200,
+        max_depth     = 8,
+        min_samples_split = 3,
+        min_samples_leaf  = 1,
+        class_weight  = "balanced",
+        random_state  = 42,
+        n_jobs        = -1
+    )
+
+    print("Training Random Forest (200 trees)...")
+    model.fit(X_train, y_train)
+
+    # Evaluate
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)
+
+    unique_labels = sorted(y.unique())
+    target_names = [LABEL_MAP[i].title() + " Risk" for i in unique_labels]
+
+    print("\n=== Classification Report ===")
+    print(classification_report(y_test, y_pred,
+          labels=unique_labels,
+          target_names=target_names,
+          zero_division=0))
+
+    print("=== Confusion Matrix ===")
+    print(confusion_matrix(y_test, y_pred, labels=unique_labels))
+
+    # Cross validation
+    cv_scores = cross_val_score(model, X_scaled, y, cv=5, scoring="accuracy")
+    print(f"\n5-Fold CV Accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std():.3f})")
+
+    # Feature importance
     importances = model.feature_importances_
-    features = X.columns
-    for feature, imp in zip(features, importances):
-        print(f"Feature '{feature}': {imp:.4f}")
+    print("\n=== Feature Importances ===")
+    for feat, imp in sorted(zip(FEATURE_COLS, importances), key=lambda x: -x[1]):
+        print(f"  {feat:<25} {imp:.4f}")
+
+    # Save model and scaler
+    joblib.dump(model, MODEL_PATH)
+    joblib.dump(scaler, SCALER_PATH)
+
+    import json
+    with open(FEATURES_PATH, "w") as f:
+        json.dump(FEATURE_COLS, f)
+
+    print(f"\nModel saved  : {MODEL_PATH}")
+    print(f"Scaler saved : {SCALER_PATH}")
+    print("Training complete.")
 
 if __name__ == "__main__":
-    main()
+    train()

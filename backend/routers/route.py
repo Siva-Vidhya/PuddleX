@@ -1,34 +1,68 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
-from services import routing
+from sqlalchemy.orm import Session
+from database import get_db
+from services.routing import compute_safe_route
+from services.geocoding import geocode, reverse_geocode
 
-router = APIRouter(prefix="/api/route", tags=["routing"])
+router = APIRouter(prefix="/api", tags=["routing"])
 
 class RouteRequest(BaseModel):
-    start_lat: float
-    start_lng: float
-    end_lat: float
-    end_lng: float
+    start_lat:   float | None = None
+    start_lng:   float | None = None
+    end_lat:     float | None = None
+    end_lng:     float | None = None
+    start_place: str | None = None   # e.g. "T Nagar"
+    end_place:   str | None = None   # e.g. "Adyar"
 
-@router.post("")
-def get_routes(req: RouteRequest):
-    # Ensure graph is initialized
-    routing.init_graph()
-    
-    start_node = routing.get_nearest_node(req.start_lat, req.start_lng)
-    end_node = routing.get_nearest_node(req.end_lat, req.end_lng)
-    
-    if start_node is None or end_node is None:
-        raise HTTPException(status_code=400, detail="Could not map coordinates to graph nodes.")
-        
-    shortest_route = routing.calculate_route(start_node, end_node, weight_type='distance_weight')
-    puddlex_route = routing.calculate_route(start_node, end_node, weight_type='safe_weight')
-    
-    if not shortest_route or not puddlex_route:
-        raise HTTPException(status_code=404, detail="Route not found between these points.")
-        
-    return {
-        "shortest": shortest_route,
-        "puddlex": puddlex_route
-    }
+class GeocodeRequest(BaseModel):
+    place: str
+
+@router.post("/route")
+async def get_safe_route(
+    request: RouteRequest,
+    db: Session = Depends(get_db)
+):
+    start_lat = request.start_lat
+    start_lng = request.start_lng
+    end_lat   = request.end_lat
+    end_lng   = request.end_lng
+
+    # Geocode place names if coordinates not provided
+    if request.start_place and (start_lat is None or start_lng is None):
+        geocoded = await geocode(request.start_place)
+        if "error" in geocoded:
+            raise HTTPException(status_code=400, detail=f"Could not find: {request.start_place}")
+        start_lat = geocoded["lat"]
+        start_lng = geocoded["lng"]
+
+    if request.end_place and (end_lat is None or end_lng is None):
+        geocoded = await geocode(request.end_place)
+        if "error" in geocoded:
+            raise HTTPException(status_code=400, detail=f"Could not find: {request.end_place}")
+        end_lat = geocoded["lat"]
+        end_lng = geocoded["lng"]
+
+    if None in [start_lat, start_lng, end_lat, end_lng]:
+        raise HTTPException(status_code=400, detail="Provide coordinates or place names for start and end")
+
+    result = await compute_safe_route(start_lat, start_lng, end_lat, end_lng, db)
+
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    return result
+
+@router.post("/geocode")
+async def geocode_place(request: GeocodeRequest):
+    result = await geocode(request.place)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+@router.get("/geocode")
+async def geocode_get(q: str):
+    result = await geocode(q)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
