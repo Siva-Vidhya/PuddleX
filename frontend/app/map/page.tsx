@@ -72,6 +72,7 @@ export default function MapPage() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
   const [roads, setRoads] = useState<RoadSegment[]>([]);
+  const setRoadSegments = setRoads;
   const [roadsLoading, setRoadsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [toastMsg, setToastMsg] = useState("");
@@ -128,28 +129,30 @@ export default function MapPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Load road risk segments from backend — refresh every 15 minutes
   useEffect(() => {
-    const fetchRoads = async () => {
+    const warmupAndLoad = async () => {
+      // Ping backend first to wake it up
       try {
-        setRoadsLoading(true);
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const res = await fetch(`${apiUrl}/api/roads`);
-        const data = await res.json();
-        const roadSegments = data.roads || [];
-        setRoads(roadSegments);
-        console.log("Road segments loaded:", roadSegments.length);
-        console.log("First segment:", JSON.stringify(roadSegments[0]));
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/health`)
+      } catch (_) {}
+
+      // Then fetch roads
+      try {
+        setRoadsLoading(true)
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/roads`)
+        const data = await res.json()
+        setRoadSegments(data.roads || [])
       } catch (err) {
-        console.error("Failed to fetch road segments:", err);
+        console.error("Failed to fetch road segments:", err)
       } finally {
-        setRoadsLoading(false);
+        setRoadsLoading(false)
       }
-    };
-    fetchRoads();
-    const interval = setInterval(fetchRoads, 15 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
+    }
+
+    warmupAndLoad()
+    const interval = setInterval(warmupAndLoad, 15 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Handle shared route from URL params
   useEffect(() => {
@@ -351,6 +354,14 @@ export default function MapPage() {
             </Link>
           </div>
           
+          {roadsLoading && (
+            <div className="mb-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+              <p className="text-xs text-blue-700 animate-pulse">
+                ⏳ Connecting to flood data server...
+              </p>
+            </div>
+          )}
+
           {homeAlert && (
             <div className="mb-3 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center justify-between">
               <p className="text-xs text-red-700 font-medium">{homeAlert}</p>
