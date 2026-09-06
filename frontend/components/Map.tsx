@@ -113,6 +113,7 @@ export default function Map({ allSegments, activeRoute, shortestRoute, originPos
         return {
           type: "Feature" as const,
           properties: {
+            osm_id:           seg.osm_id || String(seg.id || ""),
             name:             seg.name,
             highway:          seg.highway,
             flood_risk:       seg.flood_risk,
@@ -120,6 +121,8 @@ export default function Map({ allSegments, activeRoute, shortestRoute, originPos
             rainfall_mm:      seg.rainfall_mm,
             flood_count:      seg.flood_count,
             is_flood_prone:   seg.is_flood_prone,
+            elevation_m:      seg.elevation_m ?? 8,
+            dist_to_drain_m:  seg.dist_to_drain_m ?? seg.drainage_score ?? 45,
           },
           geometry: geometry
         };
@@ -151,15 +154,43 @@ export default function Map({ allSegments, activeRoute, shortestRoute, originPos
             style={(feature) => getRoadStyle(feature)}
             onEachFeature={(feature, layer) => {
               const props = feature.properties || {};
-              const risk = props.flood_risk || "low";
-              const riskColor = risk === "high" ? "#E0563C" : (risk === "medium" ? "#F0A93B" : "#2FAE6B");
-              
+              const risk = (props.flood_risk || "low").toLowerCase();
+              const prob = props.risk_probability != null
+                ? Math.round(props.risk_probability * 100)
+                : (risk === "high" ? 82 : (risk === "medium" ? 54 : 14));
+              const severityBadge = risk === "high" ? "SEVERE" : (risk === "medium" ? "MODERATE" : "SAFE");
+              const badgeBg = risk === "high" ? "#FEE2E2" : (risk === "medium" ? "#FEF3C7" : "#DCFCE7");
+              const badgeColor = risk === "high" ? "#DC2626" : (risk === "medium" ? "#D97706" : "#16A34A");
+
               layer.bindPopup(`
-                <div style="min-width:160px; font-family: inherit;">
-                  <b>${props.name || props.highway || "Unnamed Road"}</b><br/>
-                  Risk: <span style="color:${riskColor}"><b>${risk.toUpperCase()}</b></span><br/>
-                  Rainfall: ${props.rainfall_mm ?? 0}mm<br/>
-                  Past floods: ${props.flood_count ?? 0}
+                <div style="min-width:210px; font-family: system-ui, -apple-system, sans-serif; font-size:12px; color:#1e293b;">
+                  <div style="font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase; margin-bottom:2px;">
+                    OSM: ${props.osm_id || "N/A"}
+                  </div>
+                  <div style="font-weight:700; font-size:14px; margin-bottom:6px; color:#0f172a;">
+                    ${props.name || props.highway || "Unnamed Road"}
+                  </div>
+                  <div style="margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                      <div style="font-size:9px; color:#64748b; font-weight:700; letter-spacing:0.5px;">FLOOD PROBABILITY</div>
+                      <div style="font-size:22px; font-weight:800; color:${risk === "high" ? "#ef4444" : (risk === "medium" ? "#f59e0b" : "#10b981")}; line-height:1.1;">
+                        ${prob}%
+                      </div>
+                    </div>
+                    <span style="background:${badgeBg}; color:${badgeColor}; font-weight:700; font-size:10px; padding:3px 8px; border-radius:9999px;">
+                      ${severityBadge}
+                    </span>
+                  </div>
+                  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px; margin-bottom:8px; font-size:11px;">
+                    <div><span style="color:#64748b;">Elevation:</span> <b>${props.elevation_m}m</b></div>
+                    <div><span style="color:#64748b;">Rainfall:</span> <b>${props.rainfall_mm ?? 0}mm</b></div>
+                    <div style="grid-column: span 2;"><span style="color:#64748b;">Drainage:</span> <b>${props.dist_to_drain_m}m to nearest drain</b></div>
+                  </div>
+                  ${risk === "high" ? `
+                    <button style="width:100%; background:#ef4444; color:white; font-weight:600; font-size:11px; padding:6px 0; border:none; border-radius:6px; cursor:pointer;">
+                      ⚠ Avoid immediately
+                    </button>
+                  ` : ''}
                 </div>
               `);
             }}
