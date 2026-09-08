@@ -111,9 +111,42 @@ export default function MapPage() {
   const [homeAlert, setHomeAlert] = useState<string | null>(null);
 
   // States for interactive features
-  const [simulatedRainfall, setSimulatedRainfall] = useState<number | null>(null);
+  const [simulatedRainfall, setSimulatedRainfall] = useState(0);
+  const [simulating, setSimulating] = useState(false);
+  const [riskSummary, setRiskSummary] = useState({
+    total: 0, safe: 0, moderate: 0, high: 0, severe: 0
+  });
   const [riskFilter, setRiskFilter] = useState<"All" | "Safe" | "Moderate" | "High" | "Severe">("All");
   const [temperature, setTemperature] = useState<number | null>(29.5);
+
+  const handleSimulateRainfall = async (value: number) => {
+    setSimulatedRainfall(value);
+    setSimulating(true);
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(
+        `${apiUrl}/api/roads?simulate_rainfall=${value}`
+      );
+      const data = await res.json();
+      const roads = data.roads || [];
+      setRoadSegments(roads);
+
+      // Recompute risk summary from returned data
+      const total  = roads.length;
+      const safe   = roads.filter((r: any) => r.flood_risk === "low").length;
+      const moderate = roads.filter((r: any) => r.flood_risk === "medium").length;
+      const high   = roads.filter((r: any) => r.flood_risk === "high").length;
+      const severe = roads.filter((r: any) => r.flood_risk === "severe").length;
+
+      setRiskSummary({ total, safe, moderate, high, severe });
+
+    } catch (err) {
+      console.error("Simulation failed:", err);
+    } finally {
+      setSimulating(false);
+    }
+  };
 
   useEffect(() => {
     const prefs = getPreferences();
@@ -185,9 +218,17 @@ export default function MapPage() {
 
       try {
         setRoadsLoading(true);
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/roads`);
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/roads`);
         const data = await res.json();
-        setRoadSegments(data.roads || []);
+        const roads = data.roads || [];
+        setRoadSegments(roads);
+        setRiskSummary({
+          total:    roads.length,
+          safe:     roads.filter((r: any) => r.flood_risk === "low").length,
+          moderate: roads.filter((r: any) => r.flood_risk === "medium").length,
+          high:     roads.filter((r: any) => r.flood_risk === "high").length,
+          severe:   roads.filter((r: any) => r.flood_risk === "severe").length,
+        });
       } catch (err) {
         console.error("Failed to fetch road segments:", err);
       } finally {
@@ -421,33 +462,9 @@ export default function MapPage() {
     handleGetRoute();
   };
 
-  // Compute simulated roads based on simulation slider
-  const effectiveRainfall = simulatedRainfall ?? (areaSummary.rainfall_mm || 0);
-
-  const simulatedRoads = roads.map(r => {
-    if (simulatedRainfall === null) return r;
-    const rain = simulatedRainfall;
-    let risk: RiskLevel = "low";
-    let prob = (r.risk_probability || 0.1);
-
-    if (rain >= 30 || (r.is_flood_prone && rain >= 18)) {
-      risk = "high";
-      prob = Math.min(0.96, Math.max(0.72, prob + (rain / 100) * 0.45));
-    } else if (rain >= 10 || r.is_flood_prone) {
-      risk = "medium";
-      prob = Math.min(0.70, Math.max(0.35, prob + (rain / 100) * 0.3));
-    } else {
-      risk = "low";
-      prob = Math.min(0.30, prob);
-    }
-
-    return {
-      ...r,
-      flood_risk: risk,
-      risk_probability: Math.round(prob * 100) / 100,
-      rainfall_mm: rain,
-    };
-  });
+  // Simulated roads are updated directly from backend ML prediction
+  const effectiveRainfall = simulatedRainfall > 0 ? simulatedRainfall : (areaSummary.rainfall_mm || 0);
+  const simulatedRoads = roads;
 
   // Risk filtering
   const filteredRoads = simulatedRoads.filter(r => {
@@ -461,18 +478,27 @@ export default function MapPage() {
   });
 
   // Calculate counts for legend & statistics
-  const safeCount = simulatedRoads.filter(r => (r.flood_risk || r.risk) === "low").length;
-  const modCount = simulatedRoads.filter(r => (r.flood_risk || r.risk) === "medium").length;
-  const highCount = simulatedRoads.filter(r => (r.flood_risk || r.risk) === "high" && (r.flood_count || 0) < 3).length;
-  const severeCount = simulatedRoads.filter(r => (r.flood_risk || r.risk) === "high" && (r.flood_count || 0) >= 3).length;
-  const riskTotal = modCount + highCount + severeCount;
-  const floodedCount = simulatedRoads.filter(r => (r.flood_count || 0) > 0 || r.is_flood_prone).length;
-  const totalRoads = simulatedRoads.length || 1;
+  const safeCount = riskSummary.safe;
+  const modCount = riskSummary.moderate;
+  const highCount = riskSummary.high;
+  const severeCount = riskSummary.severe;
+  const riskTotal = riskSummary.moderate + riskSummary.high;
+  const floodedCount = riskSummary.severe;
+  const totalRoads = riskSummary.total;
+
+  // Donut chart data
+  const pieData = [
+    { name: "Safe",     value: riskSummary.safe,     color: "#10B981" },
+    { name: "Moderate", value: riskSummary.moderate,  color: "#F59E0B" },
+    { name: "High",     value: riskSummary.high,      color: "#F97316" },
+    { name: "Severe",   value: riskSummary.severe,    color: "#EF4444" },
+  ].filter(d => d.value > 0);
 
   // Percentage calculations for Donut
-  const safePct = Math.round((safeCount / totalRoads) * 100);
-  const modPct = Math.round((modCount / totalRoads) * 100);
-  const highPct = Math.round((highCount / totalRoads) * 100);
+  const totalForPct = riskSummary.total || 1;
+  const safePct = Math.round((riskSummary.safe / totalForPct) * 100);
+  const modPct = Math.round((riskSummary.moderate / totalForPct) * 100);
+  const highPct = Math.round((riskSummary.high / totalForPct) * 100);
   const sevPct = Math.max(0, 100 - (safePct + modPct + highPct));
 
   // Compute estimated total road network km
@@ -833,19 +859,19 @@ export default function MapPage() {
             <div className="grid grid-cols-2 gap-2">
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-2">
                 <span className="text-[10px] font-bold text-slate-500 uppercase">Roads</span>
-                <p className="text-sm font-extrabold text-slate-900">{totalRoads}</p>
+                <p className="text-sm font-extrabold text-slate-900">{riskSummary.total}</p>
               </div>
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2">
                 <span className="text-[10px] font-bold text-emerald-700 uppercase">Safe</span>
-                <p className="text-sm font-extrabold text-emerald-700">{safeCount}</p>
+                <p className="text-sm font-extrabold text-emerald-700">{riskSummary.safe}</p>
               </div>
               <div className="bg-red-50 border border-red-200 rounded-xl p-2">
                 <span className="text-[10px] font-bold text-red-700 uppercase">Risk</span>
-                <p className="text-sm font-extrabold text-red-700">{riskTotal}</p>
+                <p className="text-sm font-extrabold text-red-700">{riskSummary.moderate + riskSummary.high}</p>
               </div>
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-2">
                 <span className="text-[10px] font-bold text-rose-700 uppercase">Flooded</span>
-                <p className="text-sm font-extrabold text-rose-700">{floodedCount}</p>
+                <p className="text-sm font-extrabold text-rose-700">{riskSummary.severe}</p>
               </div>
             </div>
 
@@ -866,28 +892,34 @@ export default function MapPage() {
                 <span>Simulate Rainfall</span>
               </div>
               <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                {effectiveRainfall} mm
+                {simulatedRainfall} mm
               </span>
             </div>
 
             <input
               type="range"
-              min="0"
-              max="100"
-              value={effectiveRainfall}
-              onChange={(e) => setSimulatedRainfall(Number(e.target.value))}
-              className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 mt-2"
+              min={0}
+              max={100}
+              step={5}
+              value={simulatedRainfall}
+              onChange={(e) => handleSimulateRainfall(Number(e.target.value))}
+              className="w-full accent-blue-500"
             />
+            {simulating && (
+              <p className="text-xs text-blue-500 animate-pulse mt-1">
+                Recalculating road risks...
+              </p>
+            )}
 
             <div className="flex justify-between text-[10px] font-bold text-slate-400 px-0.5">
               <span>Dry (0mm)</span>
               <span>Heavy Monsoon (100mm)</span>
             </div>
 
-            {simulatedRainfall !== null && (
+            {simulatedRainfall > 0 && (
               <button
                 type="button"
-                onClick={() => setSimulatedRainfall(null)}
+                onClick={() => handleSimulateRainfall(0)}
                 className="text-[10px] font-medium text-slate-500 hover:text-slate-800 text-left underline mt-0.5"
               >
                 Reset to live weather
