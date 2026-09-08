@@ -145,14 +145,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class HealthResponse(BaseModel):
-    status: str
-    message: str
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
 
-@app.get("/api/health", response_model=HealthResponse)
-def health_check():
-    """Basic health-check route to confirm backend is running."""
-    return HealthResponse(status="ok", message="Backend Connection: OK")
 
 app.include_router(reports.router)
 app.include_router(predict.router)
