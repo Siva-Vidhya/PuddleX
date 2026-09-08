@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { 
@@ -119,34 +119,46 @@ export default function MapPage() {
   const [riskFilter, setRiskFilter] = useState<"All" | "Safe" | "Moderate" | "High" | "Severe">("All");
   const [temperature, setTemperature] = useState<number | null>(29.5);
 
-  const handleSimulateRainfall = async (value: number) => {
+  const [mapVersion, setMapVersion] = useState(0);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSimulateRainfall = useCallback((value: number) => {
     setSimulatedRainfall(value);
-    setSimulating(true);
 
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(
-        `${apiUrl}/api/roads?simulate_rainfall=${value}`
-      );
-      const data = await res.json();
-      const roads = data.roads || [];
-      setRoadSegments(roads);
-
-      // Recompute risk summary from returned data
-      const total  = roads.length;
-      const safe   = roads.filter((r: any) => r.flood_risk === "low").length;
-      const moderate = roads.filter((r: any) => r.flood_risk === "medium").length;
-      const high   = roads.filter((r: any) => r.flood_risk === "high").length;
-      const severe = roads.filter((r: any) => r.flood_risk === "severe").length;
-
-      setRiskSummary({ total, safe, moderate, high, severe });
-
-    } catch (err) {
-      console.error("Simulation failed:", err);
-    } finally {
-      setSimulating(false);
+    // Clear previous timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
     }
-  };
+
+    // Wait 500ms after user stops dragging before calling API
+    debounceTimerRef.current = setTimeout(async () => {
+      setSimulating(true);
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const url = value === 0
+          ? `${apiUrl}/api/roads`
+          : `${apiUrl}/api/roads?simulate_rainfall=${value}`;
+
+        const res = await fetch(url);
+        const data = await res.json();
+        const roads = data.roads || [];
+
+        setRoadSegments(roads);
+        setRiskSummary({
+          total:    roads.length,
+          safe:     roads.filter((r: any) => r.flood_risk === "low").length,
+          moderate: roads.filter((r: any) => r.flood_risk === "medium").length,
+          high:     roads.filter((r: any) => r.flood_risk === "high").length,
+          severe:   roads.filter((r: any) => r.flood_risk === "severe").length,
+        });
+        setMapVersion((v) => v + 1);
+      } catch (err) {
+        console.error("Simulation failed:", err);
+      } finally {
+        setSimulating(false);
+      }
+    }, 500);
+  }, []);
 
   useEffect(() => {
     const prefs = getPreferences();
@@ -820,6 +832,7 @@ export default function MapPage() {
         <main className="flex-1 relative">
           <div className="absolute inset-0 w-full h-full" style={{ zIndex: 0 }}>
             <MapComponent 
+              key={`map-roads-${mapVersion}-${simulatedRainfall}-${riskFilter}-${riskSummary.high}-${riskSummary.moderate}-${riskSummary.safe}-${roads.length}`}
               allSegments={filteredRoads} 
               activeRoute={activeRoute} 
               shortestRoute={shortestRoute}
@@ -891,8 +904,8 @@ export default function MapPage() {
                 <Sliders className="w-4 h-4 text-blue-600" />
                 <span>Simulate Rainfall</span>
               </div>
-              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                {simulatedRainfall} mm
+              <span className="text-sm font-bold text-blue-600">
+                {simulatedRainfall}mm
               </span>
             </div>
 
